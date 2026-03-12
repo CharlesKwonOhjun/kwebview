@@ -1,4 +1,79 @@
-# webview
+# kwebview
+
+> **Hard fork of [webview/webview](https://github.com/webview/webview)** with embedded mode fixes and new APIs for native Win32 host applications.
+
+---
+
+## What This Fork Adds
+
+The upstream webview library assumes it owns the top-level window. That works fine for standalone apps, but breaks down the moment you try to embed a WebView2 widget inside an existing native window — the parent window silently disappears. This fork solves that problem and ships a set of APIs purpose-built for embedded scenarios.
+
+### The Problem
+
+When you pass a parent `HWND` to `webview_create()`, the library enters "embedded mode" — the WebView2 control is hosted as a child widget inside your window. However, several internal paths still operated on the parent window as if the library owned it:
+
+- **`window_impl()` returned the parent HWND**, not the child widget. Any external call to `GetWindow()` would hand back the parent, so operations like `SetParent()` or `SetWindowPos()` silently mutated the host application's top-level window — stripping it of `WS_OVERLAPPEDWINDOW`, converting it to `WS_CHILD`, and effectively hiding it.
+- **`set_size_impl()` applied style changes and repositioning to the parent**, because it did not distinguish between standalone and embedded modes.
+- **`embed()` unconditionally called `ShowWindow()` on the widget** during WebView2 controller creation, ignoring any deferred-show intent.
+- **`dispatch_size_default()` dispatched `set_size(640, 480)`** through the message queue at init time, which cascaded into `set_size_impl()` and modified the parent.
+
+The net effect: your host window vanishes the instant the WebView2 controller finishes initialization.
+
+### The Fix
+
+All internal code paths now respect the ownership boundary. In embedded mode:
+
+- `window_impl()` returns `m_widget` (the child container), not `m_window` (the parent).
+- `set_size_impl()` resizes only `m_widget` via `MoveWindow()` — no style changes, no parent manipulation.
+- `embed()` gates visibility on an `m_auto_show` flag.
+- The rect constructor positions `m_widget` directly with `MoveWindow()` instead of routing through `set_size()`.
+
+### New APIs
+
+| Function | Description |
+|----------|-------------|
+| `webview_create_with_rect(debug, window, x, y, w, h, show)` | Create a webview at an explicit position and size. Pass `show=0` to defer display until `webview_show()` is called. When `w` and `h` are both 0, the widget fills the parent client area. |
+| `webview_show(w)` | Programmatically show a webview that was created with `show=0`. Makes the widget visible and, in standalone mode, brings the window to the foreground. |
+
+These complement the existing `webview_create()` — no breaking changes to the original API surface.
+
+### Harbour / xBase++ Bindings
+
+This fork includes a Harbour language bridge for integration with xBase-family frameworks (FiveWin, HWGUI, etc.):
+
+| Harbour Function | Maps To |
+|-----------------|---------|
+| `WebView_Create_With_Rect(lDebug, hParent, nX, nY, nW, nH, lShow)` | `webview_create_with_rect` |
+| `WebView_Show(hWebView)` | `webview_show` |
+| `TWebView():New(lDebug, hParent, nX, nY, nW, nH, lShow)` | OOP wrapper with `Show()` method |
+
+### Quick Example (Embedded in a Native Win32 Window)
+
+```c
+// Create a webview embedded in an existing window, positioned at (0,0), 800x600.
+webview_t w = webview_create_with_rect(0, parentHwnd, 0, 0, 800, 600, 1);
+webview_navigate(w, "https://example.com");
+webview_run(w);
+webview_destroy(w);
+```
+
+```c
+// Deferred show — create hidden, configure, then reveal.
+webview_t w = webview_create_with_rect(0, parentHwnd, 10, 10, 1024, 768, 0);
+webview_navigate(w, "https://example.com");
+webview_set_title(w, "My Panel");
+webview_show(w);  // Now visible.
+webview_run(w);
+webview_destroy(w);
+```
+
+---
+
+*Below is the original upstream README.*
+
+---
+
+# webview (upstream)
 
 <a href="https://discord.gg/24KMecn" title="Join the chat at Discord"><img src="https://assets-global.website-files.com/6257adef93867e50d84d30e2/636e0b5061df29d55a92d945_full_logo_blurple_RGB.svg" alt="Discord" height="20" /></a>
 [![Build Status](https://img.shields.io/github/actions/workflow/status/webview/webview/ci.yaml?branch=master)](https://github.com/webview/webview/actions)
