@@ -145,6 +145,11 @@ window.__webview__.onUnbind(" +
 
   noresult set_html(const std::string &html) { return set_html_impl(html); }
 
+  // Added by Charles KWON (KWON OhJun) charleskwonohjun@gmail.com
+  // Shows a previously hidden webview window created with show=0.
+  // Override in platform-specific engine to show widget, controller, and window.
+  virtual noresult show() { return {}; }
+
   noresult init(const std::string &js) {
     add_user_script(js);
     return {};

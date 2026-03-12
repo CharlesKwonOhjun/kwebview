@@ -1,2 +1,10 @@
-# Build artifacts
+# Build artifacts - Charles KWON (KWON OhJun) charleskwonohjun@gmail.com
 /build
+/output
+
+# Internal info (not for git) - Charles KWON (KWON OhJun) charleskwonohjun@gmail.com
+/internal_info
+
+# bkit memory files - Charles KWON (KWON OhJun) charleskwonohjun@gmail.com
+.bkit-memory.json
+.pdca-status.json

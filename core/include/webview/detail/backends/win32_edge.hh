@@ -317,6 +317,54 @@ public:
     dispatch_size_default();
   }
 
+  // Modified by Charles KWON (KWON OhJun) charleskwonohjun@gmail.com
+  //
+  // Constructor with initial window rect and show control.
+  //
+  // @param debug   Enable developer tools.
+  // @param window  Parent window handle (embedded mode) or nullptr (standalone).
+  // @param x       Initial x position (standalone: screen coords, embedded: within parent).
+  // @param y       Initial y position.
+  // @param width   Initial width (0 = use default 640).
+  // @param height  Initial height (0 = use default 480).
+  // @param show    If false, window is created hidden. Call show() to display later.
+  //
+  // Standalone mode (window=nullptr):
+  //   - Creates a new top-level window at (x, y) with given size.
+  //   - set_size() controls the webview's own window.
+  //
+  // Embedded mode (window!=nullptr):
+  //   - Parent window is NOT modified (no style change, no resize, no move).
+  //   - Only the internal m_widget is positioned within the parent via MoveWindow().
+  //   - GetWindow() returns m_widget (not the parent), so SetParent/SetSize
+  //     operate on the webview widget, not the parent window.
+  //
+  win32_edge_engine(bool debug, void *window, int x, int y, int width, int height, bool show = true)
+      : engine_base{!window}, m_init_x{x}, m_init_y{y}, m_auto_show{show} {
+    window_init(window);
+    window_settings(debug);
+    if (owns_window()) {
+      // Standalone mode: set_size controls the webview's own window
+      if (width > 0 && height > 0) {
+        set_size(width, height, WEBVIEW_HINT_NONE);
+      } else {
+        dispatch_size_default();
+      }
+    } else {
+      // Embedded mode: position m_widget inside parent, never touch parent window.
+      // This prevents the parent window from being resized/hidden/moved
+      // by the webview library during initialization.
+      if (width > 0 && height > 0) {
+        if (m_widget) {
+          MoveWindow(m_widget, x, y, width, height, TRUE);
+        }
+      } else {
+        // No explicit size given: fill the parent's client area
+        resize_widget();
+      }
+    }
+  }
+
   virtual ~win32_edge_engine() {
     if (m_com_handler) {
       m_com_handler->Release();
@@ -371,6 +419,36 @@ public:
   win32_edge_engine(win32_edge_engine &&other) = delete;
   win32_edge_engine &operator=(win32_edge_engine &&other) = delete;
 
+  // Modified by Charles KWON (KWON OhJun) charleskwonohjun@gmail.com
+  //
+  // Shows a previously hidden webview window.
+  // Use after creating with webview_create_with_rect(..., show=0).
+  //
+  // This method makes visible:
+  //   1. The WebView2 controller (put_IsVisible)
+  //   2. The widget window (m_widget) that hosts WebView2
+  //   3. The main window (m_window) if in standalone mode
+  //
+  // Sets m_auto_show=true so that subsequent set_size/window_show
+  // calls will also show the window normally.
+  //
+  noresult show() override {
+    m_auto_show = true;
+    if (m_controller) {
+      m_controller->put_IsVisible(TRUE);
+    }
+    if (m_widget) {
+      ShowWindow(m_widget, SW_SHOW);
+      UpdateWindow(m_widget);
+    }
+    if (owns_window()) {
+      ShowWindow(m_window, SW_SHOW);
+      UpdateWindow(m_window);
+      SetFocus(m_window);
+    }
+    return {};
+  }
+
 protected:
   noresult run_impl() override {
     MSG msg;
@@ -380,7 +458,24 @@ protected:
     }
     return {};
   }
+  // Modified by Charles KWON (KWON OhJun) charleskwonohjun@gmail.com
+  //
+  // Returns the webview's own window handle.
+  //
+  // Standalone mode: returns m_window (the top-level window created by the library).
+  // Embedded mode:   returns m_widget (the child window hosting WebView2).
+  //
+  // Rationale: In embedded mode, m_window is the PARENT window provided by the
+  // caller (e.g., a FiveWin dialog). Returning it from GetWindow() would cause
+  // operations like SetWindowPos, SetWindowLong, SetParent to modify the parent
+  // window instead of the webview, leading to the parent being resized, moved,
+  // or having its style changed (e.g., WS_CHILD applied to a top-level window,
+  // causing it to disappear).
+  //
   result<void *> window_impl() override {
+    if (!owns_window() && m_widget) {
+      return m_widget;
+    }
     if (m_window) {
       return m_window;
     }
@@ -398,6 +493,7 @@ protected:
     }
     return error_info{WEBVIEW_ERROR_INVALID_STATE};
   }
+
   noresult terminate_impl() override {
     PostQuitMessage(0);
     return {};
@@ -412,7 +508,33 @@ protected:
     return {};
   }
 
+  // Modified by Charles KWON (KWON OhJun) charleskwonohjun@gmail.com
+  //
+  // Sets the webview size.
+  //
+  // Embedded mode: Only resizes m_widget (the webview child window).
+  //   The parent window (m_window) is never modified - no style change,
+  //   no SetWindowPos, no SetWindowLong. This prevents the parent from
+  //   being unexpectedly resized or having its style corrupted.
+  //   Also called by dispatch_size_default() during WebView2 initialization.
+  //
+  // Standalone mode: Original behavior - resizes m_window directly,
+  //   applies style hints, and shows the window via window_show().
+  //
   noresult set_size_impl(int width, int height, webview_hint_t hints) override {
+    // Embedded mode: resize widget only, never touch parent window
+    if (!owns_window()) {
+      if (m_widget && hints == WEBVIEW_HINT_NONE) {
+        auto dpi = get_window_dpi(m_window);
+        m_dpi = dpi;
+        auto scaled_size =
+            scale_size(width, height, get_default_window_dpi(), dpi);
+        MoveWindow(m_widget, 0, 0, scaled_size.cx, scaled_size.cy, TRUE);
+      }
+      return {};
+    }
+
+    // Standalone mode: original behavior
     auto style = GetWindowLong(m_window, GWL_STYLE);
     if (hints == WEBVIEW_HINT_FIXED) {
       style &= ~(WS_THICKFRAME | WS_MAXIMIZEBOX);
@@ -605,8 +727,10 @@ private:
       });
       RegisterClassExW(&wc);
 
-      CreateWindowW(L"webview", L"", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
-                    CW_USEDEFAULT, 0, 0, nullptr, nullptr, hInstance, this);
+      // Use initial rect if specified, otherwise CW_USEDEFAULT - Charles KWON (KWON OhJun) charleskwonohjun@gmail.com
+      CreateWindowW(L"webview", L"", WS_OVERLAPPEDWINDOW,
+                    m_init_x, m_init_y, 0, 0,
+                    nullptr, nullptr, hInstance, this);
       if (!m_window) {
         throw exception{WEBVIEW_ERROR_INVALID_STATE, "Window is null"};
       }
@@ -715,8 +839,33 @@ private:
     embed(m_widget, debug, cb).ensure_ok();
   }
 
+  // Modified by Charles KWON (KWON OhJun) charleskwonohjun@gmail.com
+  //
+  // Shows the standalone window (called from set_size_impl after resizing).
+  // Only applies to standalone mode (owns_window() == true).
+  //
+  // When m_auto_show is false (show=0 in webview_create_with_rect):
+  //   - Marks window as "shown" internally but does NOT call ShowWindow.
+  //   - The window remains hidden until show() is explicitly called.
+  //
+  // When m_auto_show is true:
+  //   - Shows widget + WebView2 controller (may have been deferred from embed()).
+  //   - Shows and focuses the main window.
+  //
   noresult window_show() {
     if (owns_window() && !m_is_window_shown) {
+      if (!m_auto_show) {
+        m_is_window_shown = true;
+        return {};
+      }
+      // Show widget and WebView2 controller if they were deferred
+      if (m_controller) {
+        m_controller->put_IsVisible(TRUE);
+      }
+      if (m_widget) {
+        ShowWindow(m_widget, SW_SHOW);
+        UpdateWindow(m_widget);
+      }
       ShowWindow(m_window, SW_SHOW);
       UpdateWindow(m_window);
       SetFocus(m_window);
@@ -796,11 +945,17 @@ private:
   return window.chrome.webview.postMessage(message);\n\
 }");
     resize_webview();
-    m_controller->put_IsVisible(TRUE);
-    ShowWindow(m_widget, SW_SHOW);
-    UpdateWindow(m_widget);
-    if (owns_window()) {
-      focus_webview();
+    // Modified by Charles KWON (KWON OhJun) charleskwonohjun@gmail.com
+    // When show=0 (m_auto_show=false), defer widget/controller visibility
+    // until show() is explicitly called. This allows the caller to set up
+    // the webview (navigate, bind, etc.) before making it visible.
+    if (m_auto_show) {
+      m_controller->put_IsVisible(TRUE);
+      ShowWindow(m_widget, SW_SHOW);
+      UpdateWindow(m_widget);
+      if (owns_window()) {
+        focus_webview();
+      }
     }
     return {};
   }
@@ -896,6 +1051,15 @@ private:
   mswebview2::loader m_webview2_loader;
   int m_dpi{};
   bool m_is_window_shown{};
+  // Added by Charles KWON (KWON OhJun) charleskwonohjun@gmail.com
+  // m_init_x/y: Initial window position for standalone mode (used in CreateWindowW).
+  //   Defaults to CW_USEDEFAULT. Set by webview_create_with_rect().
+  // m_auto_show: Controls deferred window visibility.
+  //   When false, embed() skips ShowWindow/put_IsVisible, and window_show()
+  //   skips ShowWindow. Call show() to make everything visible later.
+  int m_init_x = CW_USEDEFAULT;
+  int m_init_y = CW_USEDEFAULT;
+  bool m_auto_show = true;
 };
 
 } // namespace detail

@@ -60,6 +60,36 @@ extern "C" {
 WEBVIEW_API webview_t webview_create(int debug, void *window);
 
 /**
+ * Creates a new webview instance with specified window position and size.
+ * - Charles KWON (KWON OhJun) charleskwonohjun@gmail.com
+ *
+ * @param debug Enable developer tools if supported by the backend.
+ * @param window Optional native window handle. Same as webview_create().
+ * @param x Initial x position of the window in screen coordinates.
+ * @param y Initial y position of the window in screen coordinates.
+ * @param width Initial width of the window (client area, before DPI scaling).
+ * @param height Initial height of the window (client area, before DPI scaling).
+ * @param show If non-zero, show the window immediately (default behavior).
+ *        If zero, the window is created hidden. Use ShowWindow() to show later.
+ * @return @c NULL on failure.
+ * @retval WEBVIEW_ERROR_MISSING_DEPENDENCY
+ *         May be returned if WebView2 is unavailable on Windows.
+ */
+WEBVIEW_API webview_t webview_create_with_rect(int debug, void *window,
+                                                int x, int y,
+                                                int width, int height,
+                                                int show);
+
+/**
+ * Shows a previously hidden webview window.
+ * Use after creating a webview with webview_create_with_rect() with show=0.
+ * - Charles KWON (KWON OhJun) charleskwonohjun@gmail.com
+ *
+ * @param w The webview instance.
+ */
+WEBVIEW_API webview_error_t webview_show(webview_t w);
+
+/**
  * Destroys a webview instance and closes the native window.
  *
  * @param w The webview instance.

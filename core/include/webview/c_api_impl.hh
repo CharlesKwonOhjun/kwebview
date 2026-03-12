@@ -102,6 +102,32 @@ WEBVIEW_API webview_t webview_create(int debug, void *wnd) {
   return nullptr;
 }
 
+// Charles KWON (KWON OhJun) charleskwonohjun@gmail.com
+WEBVIEW_API webview_t webview_create_with_rect(int debug, void *wnd,
+                                                int x, int y,
+                                                int width, int height,
+                                                int show) {
+  using namespace webview::detail;
+  webview::webview *w{};
+  auto err = api_filter(
+      [=]() -> webview::result<webview::webview *> {
+        return new webview::webview{static_cast<bool>(debug), wnd,
+                                    x, y, width, height,
+                                    static_cast<bool>(show)};
+      },
+      [&](webview::webview *w_) { w = w_; });
+  if (err == WEBVIEW_ERROR_OK) {
+    return w;
+  }
+  return nullptr;
+}
+
+// Charles KWON (KWON OhJun) charleskwonohjun@gmail.com
+WEBVIEW_API webview_error_t webview_show(webview_t w) {
+  using namespace webview::detail;
+  return api_filter([=] { return cast_to_webview(w)->show(); });
+}
+
 WEBVIEW_API webview_error_t webview_destroy(webview_t w) {
   using namespace webview::detail;
   return api_filter([=]() -> webview::noresult {

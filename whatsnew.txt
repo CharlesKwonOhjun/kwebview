@@ -1,0 +1,79 @@
+================================================================================
+ kwebview - Change History (whatsnew.txt)
+ Author: Charles KWON (KWON OhJun) <charleskwonohjun@gmail.com>
+================================================================================
+
+[2025-03-12] Major Update - Embedded WebView Support & Rect API
+--------------------------------------------------------------------------------
+
+ ADDED:
+  - webview_create_with_rect() API
+    New C API function to create a webview with explicit position and size
+    (x, y, width, height) plus a "show" flag for deferred display.
+    Declared in: core/include/webview/api.h
+    Implemented in: core/include/webview/c_api_impl.hh
+
+  - webview_show() API
+    New C API function to explicitly show a previously hidden webview.
+    Works with the deferred-show feature of webview_create_with_rect().
+    Declared in: core/include/webview/api.h
+    Implemented in: core/include/webview/c_api_impl.hh
+
+  - Harbour bridge functions
+    WEBVIEW_CREATE_WITH_RECT( lDebug, hParent, nX, nY, nW, nH, lShow )
+    WEBVIEW_SHOW( hWebView )
+    Implemented in: internal_info/webview.c
+
+  - TWebView:New() extended parameters
+    Accepts nX, nY, nWidth, nHeight, lShow for rect-based creation.
+    Added TWebView:Show() method.
+    Implemented in: internal_info/twebview.prg
+
+  - show() virtual method in engine_base
+    Added virtual noresult show() to engine_base.hh for cross-platform
+    deferred-show support.
+
+ MODIFIED:
+  - core/include/webview/detail/backends/win32_edge.hh
+    * New rect constructor: win32_edge_engine(debug, window, x, y, w, h, show)
+    * Member variables added: m_init_x, m_init_y, m_auto_show
+    * window_impl() override: Returns m_widget (not m_window) in embedded mode.
+      ROOT CAUSE FIX - Previously returned the parent HWND, causing external
+      operations (SetParent, SetWindowPos) to accidentally modify the parent
+      window, making the FiveWin dialog disappear.
+    * set_size_impl() override: In embedded mode, only resizes m_widget.
+      Previously applied style changes and SetWindowPos to the parent window.
+    * embed(): Gated ShowWindow(m_widget) on m_auto_show flag.
+      Previously showed the widget unconditionally during WebView2 init.
+    * window_show(): Respects m_auto_show for deferred display.
+    * show() override: Public method to display a deferred webview.
+    * CreateWindowW: Uses m_init_x/m_init_y for standalone window position.
+
+  - core/include/webview/detail/backends/cocoa_webkit.hh
+    * Added rect constructor stub for macOS compatibility.
+
+  - core/include/webview/detail/backends/gtk_webkitgtk.hh
+    * Added rect constructor stub for Linux/GTK compatibility.
+
+  - .gitignore
+    * Added build artifacts and internal_info exclusions.
+
+ FIXED:
+  - Parent window disappearing in embedded mode (Critical)
+    When creating a webview with a parent HWND, the parent FiveWin dialog
+    would disappear. This was caused by multiple issues:
+    1. window_impl() returned m_window (parent HWND) instead of m_widget
+       in embedded mode, causing GetWindow() to return the parent.
+    2. set_size_impl() modified parent window style with SetWindowLong
+       and repositioned it with SetWindowPos.
+    3. embed() unconditionally called ShowWindow on the widget.
+    4. dispatch_size_default() triggered set_size(640,480) during init,
+       which modified the parent through set_size_impl.
+
+  - 3-Window Architecture Clarified:
+    * m_window   = main/parent window (NOT owned in embedded mode)
+    * m_widget   = WS_CHILD container for WebView2 (owned)
+    * m_message_window = dispatch queue window (internal)
+    In embedded mode, all external operations must target m_widget only.
+
+================================================================================

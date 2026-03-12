@@ -105,6 +105,19 @@ public:
     dispatch_size_default();
   }
 
+  // Constructor with initial window rect - Charles KWON (KWON OhJun) charleskwonohjun@gmail.com
+  gtk_webkit_engine(bool debug, void *window, int x, int y, int width, int height, bool show = true)
+      : engine_base{!window} {
+    window_init(window);
+    window_settings(debug);
+    if (width > 0 && height > 0) {
+      set_size(width, height, WEBVIEW_HINT_NONE);
+    } else {
+      dispatch_size_default();
+    }
+    (void)x; (void)y; (void)show;
+  }
+
   gtk_webkit_engine(const gtk_webkit_engine &) = delete;
   gtk_webkit_engine &operator=(const gtk_webkit_engine &) = delete;
   gtk_webkit_engine(gtk_webkit_engine &&) = delete;
